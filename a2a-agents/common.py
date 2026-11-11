@@ -10,7 +10,7 @@ import time
 from failures import classify_exception, FailureReason
 
 MCP_URL = "http://localhost:8080/sse"
-llm = ChatOllama(model="qwen2.5:7b", temperature=0.2)
+llm = ChatOllama(model="qwen2.5:7b-8k", temperature=0.2)
 
 # in common.py, near the top
 _mcp_failure_count = 0

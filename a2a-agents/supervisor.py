@@ -8,17 +8,26 @@ import time
 import httpx
 from a2a.client import ClientConfig
 
-llm = ChatOllama(model="qwen2.5:7b", temperature=0)
-AGENTS = {"order": "http://localhost:9101", "inventory": "http://localhost:9102"}
-
+llm = ChatOllama(model="qwen2.5:7b-8k", temperature=0)
+AGENTS = {
+    "order": "http://localhost:9101", 
+    "inventory": "http://localhost:9102",
+    "cart": "http://localhost:9103" 
+}
 
 def route(text: str) -> str:
     has_order_signal = bool(re.search(r'\border\s*#?\s*\d+\b', text, re.IGNORECASE) or
                              re.search(r'\b(status|shipped|delivered|cancelled|refund)\b', text, re.IGNORECASE))
     has_inventory_signal = bool(re.search(r'\b(stock|inventory|how many|available|in stock)\b', text, re.IGNORECASE))
+    has_cart_signal = bool(re.search(r'\b(cart|add|basket|checkout|remove|buy|purchase)\b', text, re.IGNORECASE))
 
-    if has_order_signal and has_inventory_signal:
+    signals = sum([has_order_signal, has_inventory_signal, has_cart_signal])
+    
+    # If multiple signals are detected, use the existing fan-out logic
+    if signals >= 2:
         return "both"
+    if has_cart_signal:
+        return "cart"
     if has_order_signal:
         return "order"
     if has_inventory_signal:
@@ -90,14 +99,22 @@ async def main():
         route_ms = (time.time() - t0) * 1000
         log_event(trace_id, "supervisor.route", input=text, target=target, latency_ms=route_ms)
 
-        print(f"[routed to {target}_agent via A2A]  trace_id={trace_id}")
+        # print(f"[routed to {target}_agent via A2A]  trace_id={trace_id}")
+        # if target == "both":
+        #     print("[fan-out: order_agent + inventory_agent in parallel via A2A]")
+        #     result = await ask_both(text, trace_id)
+        # else:
+        #     print(f"[routed to {target}_agent via A2A]  trace_id={trace_id}")
+        #     result = await ask(AGENTS[target], text, trace_id)
+
         if target == "both":
             print("[fan-out: order_agent + inventory_agent in parallel via A2A]")
             result = await ask_both(text, trace_id)
         else:
+            # Keep only ONE print statement here
             print(f"[routed to {target}_agent via A2A]  trace_id={trace_id}")
             result = await ask(AGENTS[target], text, trace_id)
-
+            
         print("Bot:", result, "\n")
         #t1 = time.time()
         #result = await ask(AGENTS[target], text,trace_id)

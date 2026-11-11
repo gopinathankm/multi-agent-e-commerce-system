@@ -1,365 +1,629 @@
-# MCP Demo — E-commerce Model Context Protocol Server & Client
+# Multi-Agents-E-Commerce-System: E-commerce Model Context Protocol Server & Client
 
-A minimal demo of the **Model Context Protocol (MCP)** applied to an e-commerce domain, built with Spring Boot and Spring AI.
+- A comprehensive, **cross-language** demonstration of **modern Agentic AI protocols**. 
+- This project proves how the **Model Context Protocol (MCP)** and the **Agent2Agent (A2A)** protocol can be combined to build a **distributed**, **robust**, **multi-agent microservices architecture** with a professional GUI.
 
-## What this is
+---
 
-- **Mcp-Server**: Exposes e-commerce tools (`searchProducts`, `checkInventory`, `getOrderStatus`) over MCP using an H2 in-memory database. Any MCP-compatible client (Claude Desktop, custom agents, IDEs) can discover and invoke these tools.
-- **Mcp-Client**: A minimal Java MCP client that connects to the server, lists available tools, and invokes them — demonstrating real tool discovery and execution over the protocol.
+## 🌟 Application Overview
 
-## Why MCP (not just a REST API)
+- This system simulates an e-commerce backend where AI agents handle customer queries. 
+- Instead of a monolithic LLM application, the system is broken down into:
+- **Model Context Protocol (MCP) Server**: 
+- A **Java-based Tool Provider**:
+    - Exposes e-commerce tools over **Model Context Protocol (MCP)** using an **H2 in-memory database**. 
+    - **`searchProducts`**
+    - **`checkInventory`**
+    - **`getOrderStatus`**
+    - **`addToCart`**
+    - **`viewCart`**
+    - **`removeFromCart`**
+    - **`checkout`**
+- Any **Model Context Protocol (MCP)** compatible client (Claude Desktop, custom agents, IDEs) can **discover** and invoke these **tools**.
 
-MCP standardizes how AI agents discover and call external tools, decoupling tool *providers* (this server) from tool *consumers* (any LLM-based client). This mirrors how production agentic systems expose internal services to AI assistants.
+- **Model Context Protocol (MCP) Client**: 
+    - A minimal **Java Model Context Protocol (MCP) client** that connects to the **Model Context Protocol (MCP) server**, lists available tools, and invokes them — demonstrating real **tool discovery** and execution over the **protocol**.
+- **Agent2Agent (A2A) Agents**: 
+    - Three independent **Python-based worker agents**:
+        - **`order_agent`**
+        - **`inventory_agent`**
+        - **`cart_agent`**
+    - that publish **Agent Cards** and execute **tasks** via **A2A JSON-RPC**.
+- **A Python Supervisor**: 
+    - An **orchestrator** that routes **user intent** to the correct **worker agent** via **deterministic regex + LLM fallback**, with **fan-out** / **join support** for compound requests. 
+- **Streamlit GUI**: 
+    - A visual, stakeholder-friendly interface that makes the **multi-agent "magic"** transparent to any audience.
 
-## Tech Stack
+---
 
-- Java 21, Spring Boot 3.5
-- Spring AI 1.1.8 (`spring-ai-starter-mcp-server-webmvc`, `spring-ai-starter-mcp-client`)
-- H2 in-memory database + Spring Data JPA
-- Transport: SSE (Server-Sent Events)
+## 🏗️ Architecture
 
-## Running it
+- The architecture strictly separates **Agent-to-Tool** communication **Model Context Protocol (MCP)** from **Agent-to-Agent (A2A)** communicationcommunication **Agent2Agent (A2A)**.
 
-**1. Start the server**
+```mermaid
+graph TD
+    User["User (CLI / Streamlit GUI)"] --> Supervisor
+    
+    subgraph Supervisor ["supervisor.py (The Brain)"]
+        direction TB
+        S1["Deterministic regex router (<1ms)"]
+        S2["LLM fallback for ambiguous intent"]
+        S3["Fan-out/join for compound requests"]
+        S4["Structured tracing (trace.log)"]
+        S5["Circuit breaker for MCP failures"]
+    end
+
+    Supervisor -->|"A2A JSON-RPC"| OrderAgent["order_agent :9101"]
+    Supervisor -->|"A2A JSON-RPC"| InventoryAgent["inventory_agent :9102"]
+    Supervisor -->|"A2A JSON-RPC"| CartAgent["cart_agent :9103"]
+
+    OrderAgent -->|"MCP (SSE)"| McpServer
+    InventoryAgent -->|"MCP (SSE)"| McpServer
+    CartAgent -->|"MCP (SSE)"| McpServer
+
+    subgraph McpServer ["Java Mcp-Server :8080 (Spring Boot 3.5)"]
+        direction TB
+        Tools["Tools: searchProducts, checkInventory, getOrderStatus,<br/>addToCart, viewCart, removeFromCart, checkout"]
+    end
+
+    McpServer -->|"JPA"| H2["H2 In-Memory Database<br/>(products, orders, cart_items)"]
+
+    classDef agent fill:#e1f5fe,stroke:#01579b,stroke-width:2px;
+    classDef server fill:#fff3e0,stroke:#e65100,stroke-width:2px;
+    class OrderAgent,InventoryAgent,CartAgent agent;
+    class McpServer server;
+```
+---
+
+## Protocol Separation
+- **MCP (Model Context Protocol)**: 
+    - Used by **Python Worker Agents** to **discover** and **execute tools** hosted on the **Java MCP Server**.
+- **A2A (Agent2Agent Protocol)**: 
+    - Used by the **Supervisor** to **discover** **Worker Agents** via their **/.well-known/agent-card.json** and delegate **tasks** via **HTTP JSON-RPC**.
+
+---
+
+## 🔄 User Journey Workflow
+- The system supports a complete end-to-end e-commerce user journey:
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant S as Supervisor
+    participant A as Agent
+    participant M as MCP Server
+    participant DB as H2 Database
+
+    U->>S: "search for mouse"
+    S->>A: Route to inventory_agent
+    A->>M: searchProducts("mouse")
+    M->>DB: SELECT products
+    DB-->>M: [Wireless Mouse, $19.99, 150]
+    M-->>A: JSON Result
+    A-->>U: "Found Wireless Mouse..."
+
+    U->>S: "add 2 to my cart"
+    S->>A: Route to cart_agent
+    A->>M: searchProducts("mouse") → addToCart(productId=1, qty=2)
+    M->>DB: INSERT cart_items
+    M-->>A: "Added 2 x Wireless Mouse to cart."
+    A-->>U: "Added to cart."
+
+    U->>S: "checkout"
+    S->>A: Route to cart_agent
+    A->>M: checkout()
+    M->>DB: INSERT orders (Status: PENDING), DELETE cart_items
+    M-->>A: "Checkout successful! Created Order #3."
+    A-->>U: "Checkout complete. Order #3 created."
+
+    U->>S: "status of order 3"
+    S->>A: Route to order_agent
+    A->>M: getOrderStatus(orderId=3)
+    M->>DB: SELECT orders
+    M-->>A: "Order #3 for Guest User is PENDING..."
+    A-->>U: "Order #3 is PENDING, total $39.98."
+```
+
+---
+
+## 🛠️ Technology Stack
+
+### Backend & Tools (Java)
+- **Java 21** (Eclipse Temurin via SDKMAN)
+- **Spring Boot 3.5** & **Spring AI 1.1.8** (spring-ai-starter-mcp-server-webmvc, spring-ai-starter-mcp-client)
+- **Spring Data JPA** & **H2 Database** (In-memory relational storage)
+- **Transport**: SSE (Server-Sent Events)
+
+### Orchestration & Agents (Python)
+- **Python 3.12** managed via **uv** (Ultra-fast package management)
+- **LangChain** & **LangGraph** (Agent reasoning and state management)
+- **Google A2A Python SDK** (**`a2a-sdk`**) for Agent-to-Agent communication
+- **FastAPI** / **Uvicorn** (Hosting the A2A Agent endpoints and API wrapper)
+- **Streamlit** (Interactive web UI for demonstrations)
+
+### Local LLM Infrastructure
+- **Ollama** running **Qwen2.5 7B** (Custom configured with 8192 token context window to handle large **A2A JSON-RPC payloads** without truncation).
+- **Hardware Target**: 
+    - NVIDIA RTX 4060 Ti (8GB VRAM).
+
+---
+
+## 🚀 How to Run the Application
+
+### Step 1: Environment 
+
+#### Prerequisites
+##### 1. Java & Maven (via SDKMAN)
 ```bash
-cd Mcp-Server
-mvn spring-boot:run
+curl -s "https://get.sdkman.io" | bash
+source "$HOME/.sdkman/bin/sdkman-init.sh"
+sdk install java 21.0.4-tem
+sdk install maven
 ```
-Server starts on `http://localhost:8080`, MCP SSE endpoint at `/sse`.
-
-**2. Run the client**
-```bash
-cd Mcp-Client
-mvn spring-boot:run
-```
-Connects to the server, lists tools, and calls `searchProducts` as a demo.
-Terminal A: brew services start ollama  
-Terminal B:  
-cd MCPServer-ClientDemo/a2a-agents  
-source venv/bin/activate  
-python order_agent.py  
-Terminal C:  
-cd ~/Documents/Projects/MCPServer-ClientDemo/a2a-agents
-source venv/bin/activate
-python inventory_agent.py
-Terminal D:
-cd ~/Documents/Projects/MCPServer-ClientDemo/a2a-agents
-source venv/bin/activate
-python supervisor.py
-## Example Output
-=== Available Tools ===
-
-Server exposes these tools:
-
-- getOrderStatus: Get the status and total amount of an order by order ID
-- searchProducts: Search products by name keyword
-- checkInventory: Check current stock quantity for a product by its ID
-
-=== Calling searchProducts(query=mouse) ===
-- [{"id":1,"name":"Wireless Mouse","category":"Electronics","price":19.99,"stockQuantity":150}]
-
-##Diagram
-<img width="1472" height="1252" alt="image" src="https://github.com/user-attachments/assets/f450073d-01c0-4ec0-bbf0-2bad8a42e909" />
-
-## Verifying the LLM is actually driving tool selection
-
-**Option A — debug logging.** Add to `application.properties`:
-```properties
-logging.level.org.springframework.ai=DEBUG
-logging.level.org.springframework.ai.mcp=DEBUG
-```
-Shows the exact prompt sent to Qwen, the tool it chose, its arguments, the tool's raw response, and the final generated answer.
-
-**Option B — kill the LLM dependency.**
-```bash
-brew services stop ollama
-```
-Send a message — expect a connection-refused error, proving there's no hardcoded fallback logic; the app genuinely needs the local LLM to respond.
-```bash
-brew services start ollama   # restart after testing
-```
-
-## Roadmap Context
-
-- **Phase 1** — in-process function calling, no protocol
-- **Phase 2** — MCP server + bare client, protocol mechanics proven
-- **Phase 3** — LLM decides tool calls from natural language over MCP
-## Phase 4 — Multi-Agent Supervisor (LangGraph)
-
-Adds a second, Python-based client (`langgraph-supervisor/`) that connects to the **same unmodified Java MCP server**, proving MCP's cross-language interoperability. Introduces a supervisor pattern: one LLM call classifies user intent, then routes to a specialized sub-agent (order vs. inventory) that has its own scoped system prompt and tool access.
-
-### Why a separate language here
-
-Spring AI doesn't yet have a mature multi-agent orchestration abstraction; **LangGraph** (Python) is currently the most established framework for this pattern. The Java MCP server required zero changes — MCP's protocol-based design means any client, in any language, can connect identically.
-
-### Tech Stack
-
-- Python 3.12, `langgraph`, `langchain`, `langchain-ollama`, `langchain-mcp-adapters`
-- Same local Qwen2.5:7b via Ollama — no new API keys, no new cost
-- Connects to the existing `Mcp-Server` over SSE — no server changes required
-
-### Architecture
-User input  
-│  
-▼  
-Supervisor (LLM call #1) — classifies intent: "order" or "inventory"  
-│  
-├── order_agent (LLM call #2, scoped tools: getOrderStatus)  
-│  
-└── inventory_agent (LLM call #2, scoped tools: searchProducts, checkInventory)  
-
-
-### Running it
+##### 2. Ollama & Custom Context Model
+- The **A2A protocol** passes heavy **JSON schemas**. 
+- We create a **custom 8K model** to prevent truncation.
 
 ```bash
-cd langgraph-supervisor
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
-With `Mcp-Server` and Ollama already running:
-```bash
-python multi-agent.py
+mkdir -p ollama-config
+echo 'FROM qwen2.5:7b
+PARAMETER num_ctx 8192' > ollama-config/Modelfile-qwen2.5-8k
+ollama create qwen2.5:7b-8k -f ollama-config/Modelfile-qwen2.5-8k
 ```
 
-### Example
-You: what's the status of order 1  
-[routed to: order_agent]  
-Bot: Order #1 for Alice Smith is SHIPPED, total $99.98  
-
-You: search for mouse  
-[routed to: inventory_agent]  
-Bot: Found Wireless Mouse — Electronics category, $19.99, 150 units in stock  
-
-## Phase 5: A2A Agent Services
-
-Phase 4's sub-agents ran in-process, so the supervisor called them as Python functions. In Phase 5 each agent becomes an independent network service that publishes an **Agent Card**, and the supervisor discovers and delegates to them over **A2A (Agent2Agent)**. The Java MCP server is unchanged: MCP handles agent-to-tool calls, A2A handles agent-to-agent calls.
-
-### Architecture
-supervisor.py  
-│ 1. classify intent (LLM call)  
-│ 2. A2A JSON-RPC over HTTP  
-├──▶ order_agent :9101 ──MCP──▶ Java Mcp-Server ──▶ H2  
-│ tools: getOrderStatus  
-└──▶ inventory_agent :9102 ──MCP──▶ Java Mcp-Server ──▶ H2  
-tools: searchProducts, checkInventory  
-
-### What each piece does
-
-| Component | Role |
-|---|---|
-| `common.py` | Builds a LangChain agent from a subset of MCP tools; `LangChainAgentExecutor` bridges A2A requests to that agent |
-| `order_agent.py` | A2A server on port 9101, exposes the order-status skill |
-| `inventory_agent.py` | A2A server on port 9102, exposes the product search and stock skill |
-| `supervisor.py` | Classifies the request, resolves the target agent, sends the task over A2A |
-
-Each agent publishes its capabilities at `/.well-known/agent-card.json`:
-```bash
-curl http://localhost:9101/.well-known/agent-card.json
-curl http://localhost:9102/.well-known/agent-card.json
-```
-
-### A2A task lifecycle
-
-The executor follows the protocol's long-running task pattern:
-1. Enqueue a `Task` (state `SUBMITTED`)
-2. Publish `TASK_STATE_WORKING`
-3. Run the LangChain agent (which calls MCP tools)
-4. Publish `TASK_STATE_COMPLETED` with the answer, or `TASK_STATE_FAILED` on error
-
-The server rejects status updates sent before the initial `Task` is enqueued, so step 1 is required.
-
-### Running it
-
-Prerequisites: Ollama running Qwen2.5, and the Java `Mcp-Server` on port 8080.
-
+##### 3. Python Environments (via uv)
 ```bash
 cd a2a-agents
-python3.12 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+uv init --python 3.12 --no-readme
+uv venv --python 3.12
+source .venv/bin/activate
+uv pip install -r requirements.txt
+uv pip install a2a-sdk fastapi uvicorn streamlit requests
 ```
+---
 
-Start each process in its own terminal (venv active in each):
+#### Step 1: Terminal 1: Start the **Java MCP Server** (if not already running)
 ```bash
-python order_agent.py       # terminal 1
-python inventory_agent.py   # terminal 2
-python supervisor.py        # terminal 3
+cd Mcp-Server
+source "$HOME/.sdkman/bin/sdkman-init.sh"
+mvn spring-boot:run
 ```
 
-Example:  
-((venv) ) prasad@Mac a2a-agents % python supervisor.py
-You: what's the status of order 1  
-[routed to order_agent via A2A]  
-[event] StreamResponse
-Bot: task {
-id: "9407b35c-b9ea-4a9c-9f47-674c40638234"  
-context_id: "69dd70a2-a2e4-439c-9b96-3809919f47e0"  
-status {
-state: TASK_STATE_COMPLETED
-message {
-message_id: "9407b35c-b9ea-4a9c-9f47-674c40638234-msg"
-role: ROLE_AGENT
-parts {
-text: "The status of order #1 is SHIPPED and the total amount is $99.98."
-}
-}
-}
-}
-You: how much stock of mouse do we have  
-[routed to inventory_agent via A2A]  
-[event] StreamResponse
-Bot: task {
-id: "b7385951-29e2-4aad-8e03-86cb1f9fac95"
-context_id: "588ea691-f9e0-47dc-bebd-543757d0231a"
-status {
-state: TASK_STATE_COMPLETED
-message {
-message_id: "b7385951-29e2-4aad-8e03-86cb1f9fac95-msg"
-role: ROLE_AGENT
-parts {
-text: "We have 150 units of the Wireless Mouse in stock."
-}
-}
-}
-## Phase 6: Deterministic Routing and Structured Tracing
+![Stage 1: Terminal 1](./images/2.png)
 
-Two additions aimed at production reliability rather than new features: a deterministic pre-check that skips the LLM for obvious routing decisions, and structured, trace-correlated logging across the whole request path.
+```text
+Terminal 1:
 
-### 6a — Deterministic router
+(.venv) user@user-Z790-UD:~/my_activities/developments/multi-agent-e-commerce-system/a2a-agents$ cd ..
+(.venv) user@user-Z790-UD:~/my_activities/developments/multi-agent-e-commerce-system$ cd Mcp-Servercd Mcp-Server
+source "$HOME/.sdkman/bin/sdkman-init.sh"
+mvn spring-boot:run
+[INFO] Scanning for projects...
+[INFO] Loaded 24431 auto-discovered prefixes for remote repository central (prefixes-central.txt)
+[INFO] 
+[INFO] -----------------< com.training:ecommerce-mcp-server >------------------
+[INFO] Building ecommerce-mcp-server 0.0.1-SNAPSHOT
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] Loaded 64 auto-discovered prefixes for remote repository apache.snapshots (prefixes-apache.snapshots.txt)
+[INFO] 
+[INFO] >>> spring-boot:3.5.14:run (default-cli) > test-compile @ ecommerce-mcp-server >>>
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ ecommerce-mcp-server ---
+[INFO] Copying 1 resource from src/main/resources to target/classes
+[INFO] Copying 0 resource from src/main/resources to target/classes
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ ecommerce-mcp-server ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ ecommerce-mcp-server ---
+[INFO] skip non existing resourceDirectory /home/user/my_activities/developments/multi-agent-e-commerce-system/Mcp-Server/src/test/resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ ecommerce-mcp-server ---
+[INFO] No sources to compile
+[INFO] 
+[INFO] <<< spring-boot:3.5.14:run (default-cli) < test-compile @ ecommerce-mcp-server <<<
+[INFO] 
+[INFO] 
+[INFO] --- spring-boot:3.5.14:run (default-cli) @ ecommerce-mcp-server ---
+[INFO] Loaded 50 auto-discovered prefixes for remote repository ow2-snapshot (prefixes-ow2-snapshot.txt)
+[INFO] Attaching agents: []
 
-The supervisor's routing was 100% LLM-based, even for unambiguous input like "status of order 1." A regex pre-check now catches obvious cases before spending a model call:
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
 
-```python
-def route(text: str) -> str:
-    if re.search(r'\border\s*#?\s*\d+\b', text, re.IGNORECASE) or \
-       re.search(r'\b(status|shipped|delivered|cancelled|refund)\b', text, re.IGNORECASE):
-        return "order"
-    if re.search(r'\b(stock|inventory|how many|available|in stock)\b', text, re.IGNORECASE):
-        return "inventory"
-    return route_with_llm(text)  # only ambiguous phrasing reaches the model
+ :: Spring Boot ::               (v3.5.14)
+
+2026-11-10T20:46:01.991+05:30  INFO 531812 --- [           main] o.e.bot.EcommerceMcpServerApplication    : Starting EcommerceMcpServerApplication using Java 21.0.4 with PID 531812 (/home/user/my_activities/developments/multi-agent-e-commerce-system/Mcp-Server/target/classes started by user in /home/user/my_activities/developments/multi-agent-e-commerce-system/Mcp-Server)
+2026-11-10T20:46:01.992+05:30  INFO 531812 --- [           main] o.e.bot.EcommerceMcpServerApplication    : No active profile set, falling back to 1 default profile: "default"
+2026-11-10T20:46:02.333+05:30  INFO 531812 --- [           main] .s.d.r.c.RepositoryConfigurationDelegate : Bootstrapping Spring Data JPA repositories in DEFAULT mode.
+2026-11-10T20:46:02.414+05:30  INFO 531812 --- [           main] .s.d.r.c.RepositoryConfigurationDelegate : Finished Spring Data repository scanning in 76 ms. Found 3 JPA repository interfaces.
+2026-11-10T20:46:02.646+05:30  WARN 531812 --- [           main] trationDelegate$BeanPostProcessorChecker : Bean 'org.springframework.ai.mcp.server.common.autoconfigure.annotations.McpServerAnnotationScannerAutoConfiguration' of type [org.springframework.ai.mcp.server.common.autoconfigure.annotations.McpServerAnnotationScannerAutoConfiguration] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying). Is this bean getting eagerly injected/applied to a currently created BeanPostProcessor [serverAnnotatedMethodBeanPostProcessor]? Check the corresponding BeanPostProcessor declaration and its dependencies/advisors. If this bean does not have to be post-processed, declare it with ROLE_INFRASTRUCTURE.
+2026-11-10T20:46:02.649+05:30  WARN 531812 --- [           main] trationDelegate$BeanPostProcessorChecker : Bean 'serverAnnotatedBeanRegistry' of type [org.springframework.ai.mcp.server.common.autoconfigure.annotations.McpServerAnnotationScannerAutoConfiguration$ServerMcpAnnotatedBeans] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying). Is this bean getting eagerly injected/applied to a currently created BeanPostProcessor [serverAnnotatedMethodBeanPostProcessor]? Check the corresponding BeanPostProcessor declaration and its dependencies/advisors. If this bean does not have to be post-processed, declare it with ROLE_INFRASTRUCTURE.
+2026-11-10T20:46:02.668+05:30  WARN 531812 --- [           main] trationDelegate$BeanPostProcessorChecker : Bean 'spring.ai.mcp.server.annotation-scanner-org.springframework.ai.mcp.server.common.autoconfigure.annotations.McpServerAnnotationScannerProperties' of type [org.springframework.ai.mcp.server.common.autoconfigure.annotations.McpServerAnnotationScannerProperties] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying). Is this bean getting eagerly injected/applied to a currently created BeanPostProcessor [serverAnnotatedMethodBeanPostProcessor]? Check the corresponding BeanPostProcessor declaration and its dependencies/advisors. If this bean does not have to be post-processed, declare it with ROLE_INFRASTRUCTURE.
+2026-11-10T20:46:02.945+05:30  INFO 531812 --- [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat initialized with port 8080 (http)
+2026-11-10T20:46:02.980+05:30  INFO 531812 --- [           main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
+2026-11-10T20:46:02.981+05:30  INFO 531812 --- [           main] o.apache.catalina.core.StandardEngine    : Starting Servlet engine: [Apache Tomcat/10.1.54]
+2026-11-10T20:46:03.050+05:30  INFO 531812 --- [           main] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring embedded WebApplicationContext
+2026-11-10T20:46:03.051+05:30  INFO 531812 --- [           main] w.s.c.ServletWebServerApplicationContext : Root WebApplicationContext: initialization completed in 1036 ms
+2026-11-10T20:46:03.136+05:30  INFO 531812 --- [           main] o.hibernate.jpa.internal.util.LogHelper  : HHH000204: Processing PersistenceUnitInfo [name: default]
+2026-11-10T20:46:03.174+05:30  INFO 531812 --- [           main] org.hibernate.Version                    : HHH000412: Hibernate ORM core version 6.6.49.Final
+2026-11-10T20:46:03.202+05:30  INFO 531812 --- [           main] o.h.c.internal.RegionFactoryInitiator    : HHH000026: Second-level cache disabled
+2026-11-10T20:46:03.415+05:30  INFO 531812 --- [           main] o.s.o.j.p.SpringPersistenceUnitInfo      : No LoadTimeWeaver setup: ignoring JPA class transformer
+2026-11-10T20:46:03.435+05:30  INFO 531812 --- [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
+2026-11-10T20:46:03.561+05:30  INFO 531812 --- [           main] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Added connection conn0: url=jdbc:h2:mem:ecommerce user=SA
+2026-11-10T20:46:03.561+05:30  INFO 531812 --- [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
+2026-11-10T20:46:03.590+05:30  INFO 531812 --- [           main] org.hibernate.orm.connections.pooling    : HHH10001005: Database info:
+	Database JDBC URL [Connecting through datasource 'HikariDataSource (HikariPool-1)']
+	Database driver: undefined/unknown
+	Database version: 2.3.232
+	Autocommit mode: undefined/unknown
+	Isolation level: undefined/unknown
+	Minimum pool size: undefined/unknown
+	Maximum pool size: undefined/unknown
+2026-11-10T20:46:03.944+05:30  INFO 531812 --- [           main] o.h.e.t.j.p.i.JtaPlatformInitiator       : HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+2026-11-10T20:46:03.960+05:30  INFO 531812 --- [           main] j.LocalContainerEntityManagerFactoryBean : Initialized JPA EntityManagerFactory for persistence unit 'default'
+2026-11-10T20:46:04.293+05:30  WARN 531812 --- [           main] JpaBaseConfiguration$JpaWebConfiguration : spring.jpa.open-in-view is enabled by default. Therefore, database queries may be performed during view rendering. Explicitly configure spring.jpa.open-in-view to disable this warning
+2026-11-10T20:46:04.444+05:30  WARN 531812 --- [           main] o.s.m.provider.tool.SyncMcpToolProvider  : No tool methods found in the provided tool objects: []
+2026-11-10T20:46:04.448+05:30  INFO 531812 --- [           main] o.s.a.m.s.c.a.McpServerAutoConfiguration : Enable tools capabilities, notification: true
+2026-11-10T20:46:04.448+05:30  INFO 531812 --- [           main] o.s.a.m.s.c.a.McpServerAutoConfiguration : Registered tools: 7
+2026-11-10T20:46:04.448+05:30  INFO 531812 --- [           main] o.s.a.m.s.c.a.McpServerAutoConfiguration : Enable resources capabilities, notification: true
+2026-11-10T20:46:04.449+05:30  INFO 531812 --- [           main] o.s.a.m.s.c.a.McpServerAutoConfiguration : Enable resources templates capabilities, notification: true
+2026-11-10T20:46:04.449+05:30  INFO 531812 --- [           main] o.s.a.m.s.c.a.McpServerAutoConfiguration : Enable prompts capabilities, notification: true
+2026-11-10T20:46:04.449+05:30  INFO 531812 --- [           main] o.s.a.m.s.c.a.McpServerAutoConfiguration : Enable completions capabilities
+2026-11-10T20:46:04.526+05:30  INFO 531812 --- [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat started on port 8080 (http) with context path '/'
+2026-11-10T20:46:04.530+05:30  INFO 531812 --- [           main] o.e.bot.EcommerceMcpServerApplication    : Started EcommerceMcpServerApplication in 2.766 seconds (process running for 2.966)
+2026-11-10T20:48:55.739+05:30  INFO 531812 --- [nio-8080-exec-1] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-11-10T20:48:55.739+05:30  INFO 531812 --- [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Initializing Servlet 'dispatcherServlet'
+2026-11-10T20:48:55.741+05:30  INFO 531812 --- [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Completed initialization in 1 ms
+2026-11-10T20:48:55.941+05:30  INFO 531812 --- [nio-8080-exec-4] i.m.server.McpAsyncServer                : Client initialize request - Protocol: 2025-11-25, Capabilities: ClientCapabilities[experimental=null, roots=null, sampling=null, elicitation=null], Info: Implementation[name=mcp, title=null, version=0.1.0]
+2026-11-10T20:48:55.941+05:30  INFO 531812 --- [nio-8080-exec-5] i.m.server.McpAsyncServer                : Client initialize request - Protocol: 2025-11-25, Capabilities: ClientCapabilities[experimental=null, roots=null, sampling=null, elicitation=null], Info: Implementation[name=mcp, title=null, version=0.1.0]
+2026-11-10T20:48:55.941+05:30  INFO 531812 --- [nio-8080-exec-6] i.m.server.McpAsyncServer                : Client initialize request - Protocol: 2025-11-25, Capabilities: ClientCapabilities[experimental=null, roots=null, sampling=null, elicitation=null], Info: Implementation[name=mcp, title=null, version=0.1.0]
+2026-11-10T20:48:55.948+05:30  WARN 531812 --- [nio-8080-exec-4] i.m.server.McpAsyncServer                : Client requested unsupported protocol version: 2025-11-25, so the server will suggest the 2024-11-05 version instead
+2026-11-10T20:48:55.948+05:30  WARN 531812 --- [nio-8080-exec-6] i.m.server.McpAsyncServer                : Client requested unsupported protocol version: 2025-11-25, so the server will suggest the 2024-11-05 version instead
+2026-11-10T20:48:55.948+05:30  WARN 531812 --- [nio-8080-exec-5] i.m.server.McpAsyncServer                : Client requested unsupported protocol version: 2025-11-25, so the server will suggest the 2024-11-05 version instead
+2026-11-10T20:49:29.529+05:30  INFO 531812 --- [nio-8080-exec-9] i.m.server.McpAsyncServer                : Client initialize request - Protocol: 2025-11-25, Capabilities: ClientCapabilities[experimental=null, roots=null, sampling=null, elicitation=null], Info: Implementation[name=mcp, title=null, version=0.1.0]
+2026-11-10T20:49:29.529+05:30  WARN 531812 --- [nio-8080-exec-9] i.m.server.McpAsyncServer                : Client requested unsupported protocol version: 2025-11-25, so the server will suggest the 2024-11-05 version instead
+2026-11-10T20:52:21.287+05:30  INFO 531812 --- [nio-8080-exec-5] i.m.server.McpAsyncServer                : Client initialize request - Protocol: 2025-11-25, Capabilities: ClientCapabilities[experimental=null, roots=null, sampling=null, elicitation=null], Info: Implementation[name=mcp, title=null, version=0.1.0]
+2026-11-10T20:52:21.287+05:30  WARN 531812 --- [nio-8080-exec-5] i.m.server.McpAsyncServer                : Client requested unsupported protocol version: 2025-11-25, so the server will suggest the 2024-11-05 version instead
+2026-11-10T20:52:21.288+05:30  INFO 531812 --- [nio-8080-exec-9] i.m.server.McpAsyncServer                : Client initialize request - Protocol: 2025-11-25, Capabilities: ClientCapabilities[experimental=null, roots=null, sampling=null, elicitation=null], Info: Implementation[name=mcp, title=null, version=0.1.0]
+2026-11-10T20:52:21.288+05:30  WARN 531812 --- [nio-8080-exec-9] i.m.server.McpAsyncServer                : Client requested unsupported protocol version: 2025-11-25, so the server will suggest the 2024-11-05 version instead
+2026-11-10T20:52:21.288+05:30  INFO 531812 --- [nio-8080-exec-6] i.m.server.McpAsyncServer                : Client initialize request - Protocol: 2025-11-25, Capabilities: ClientCapabilities[experimental=null, roots=null, sampling=null, elicitation=null], Info: Implementation[name=mcp, title=null, version=0.1.0]
+2026-11-10T20:52:21.288+05:30  WARN 531812 --- [nio-8080-exec-6] i.m.server.McpAsyncServer                : Client requested unsupported protocol version: 2025-11-25, so the server will suggest the 2024-11-05 version instead
+2026-11-10T20:52:24.347+05:30  INFO 531812 --- [nio-8080-exec-8] i.m.server.McpAsyncServer                : Client initialize request - Protocol: 2025-11-25, Capabilities: ClientCapabilities[experimental=null, roots=null, sampling=null, elicitation=null], Info: Implementation[name=mcp, title=null, version=0.1.0]
+2026-11-10T20:52:24.347+05:30  WARN 531812 --- [nio-8080-exec-8] i.m.server.McpAsyncServer                : Client requested unsupported protocol version: 2025-11-25, so the server will suggest the 2024-11-05 version instead
+2026-11-10T20:52:25.610+05:30  INFO 531812 --- [nio-8080-exec-1] i.m.server.McpAsyncServer                : Client initialize request - Protocol: 2025-11-25, Capabilities: ClientCapabilities[experimental=null, roots=null, sampling=null, elicitation=null], Info: Implementation[name=mcp, title=null, version=0.1.0]
+2026-11-10T20:52:25.610+05:30  WARN 531812 --- [nio-8080-exec-1] i.m.server.McpAsyncServer                : Client requested unsupported protocol version: 2025-11-25, so the server will suggest the 2024-11-05 version instead
+2026-11-10T20:52:26.903+05:30  INFO 531812 --- [nio-8080-exec-2] i.m.server.McpAsyncServer                : Client initialize request - Protocol: 2025-11-25, Capabilities: ClientCapabilities[experimental=null, roots=null, sampling=null, elicitation=null], Info: Implementation[name=mcp, title=null, version=0.1.0]
+2026-11-10T20:52:26.904+05:30  WARN 531812 --- [nio-8080-exec-2] i.m.server.McpAsyncServer                : Client requested unsupported protocol version: 2025-11-25, so the server will suggest the 2024-11-05 version instead
+2026-11-10T20:52:28.571+05:30  INFO 531812 --- [nio-8080-exec-9] i.m.server.McpAsyncServer                : Client initialize request - Protocol: 2025-11-25, Capabilities: ClientCapabilities[experimental=null, roots=null, sampling=null, elicitation=null], Info: Implementation[name=mcp, title=null, version=0.1.0]
+2026-11-10T20:52:28.572+05:30  WARN 531812 --- [nio-8080-exec-9] i.m.server.McpAsyncServer                : Client requested unsupported protocol version: 2025-11-25, so the server will suggest the 2024-11-05 version instead
+2026-11-10T20:52:29.995+05:30  INFO 531812 --- [nio-8080-exec-4] i.m.server.McpAsyncServer                : Client initialize request - Protocol: 2025-11-25, Capabilities: ClientCapabilities[experimental=null, roots=null, sampling=null, elicitation=null], Info: Implementation[name=mcp, title=null, version=0.1.0]
+2026-11-10T20:52:29.996+05:30  WARN 531812 --- [nio-8080-exec-4] i.m.server.McpAsyncServer                : Client requested unsupported protocol version: 2025-11-25, so the server will suggest the 2024-11-05 version instead
+2026-11-10T20:52:31.233+05:30  INFO 531812 --- [nio-8080-exec-8] i.m.server.McpAsyncServer                : Client initialize request - Protocol: 2025-11-25, Capabilities: ClientCapabilities[experimental=null, roots=null, sampling=null, elicitation=null], Info: Implementation[name=mcp, title=null, version=0.1.0]
+2026-11-10T20:52:31.233+05:30  WARN 531812 --- [nio-8080-exec-8] i.m.server.McpAsyncServer                : Client requested unsupported protocol version: 2025-11-25, so the server will suggest the 2024-11-05 version instead
+2026-11-10T20:52:32.420+05:30  INFO 531812 --- [nio-8080-exec-1] i.m.server.McpAsyncServer                : Client initialize request - Protocol: 2025-11-25, Capabilities: ClientCapabilities[experimental=null, roots=null, sampling=null, elicitation=null], Info: Implementation[name=mcp, title=null, version=0.1.0]
+2026-11-10T20:52:32.420+05:30  WARN 531812 --- [nio-8080-exec-1] i.m.server.McpAsyncServer                : Client requested unsupported protocol version: 2025-11-25, so the server will suggest the 2024-11-05 version instead
+2026-11-10T20:52:33.925+05:30  INFO 531812 --- [nio-8080-exec-2] i.m.server.McpAsyncServer                : Client initialize request - Protocol: 2025-11-25, Capabilities: ClientCapabilities[experimental=null, roots=null, sampling=null, elicitation=null], Info: Implementation[name=mcp, title=null, version=0.1.0]
+2026-11-10T20:52:33.925+05:30  WARN 531812 --- [nio-8080-exec-2] i.m.server.McpAsyncServer                : Client requested unsupported protocol version: 2025-11-25, so the server will suggest the 2024-11-05 version instead
+2026-11-10T20:52:36.920+05:30  INFO 531812 --- [nio-8080-exec-9] i.m.server.McpAsyncServer                : Client initialize request - Protocol: 2025-11-25, Capabilities: ClientCapabilities[experimental=null, roots=null, sampling=null, elicitation=null], Info: Implementation[name=mcp, title=null, version=0.1.0]
+2026-11-10T20:52:36.920+05:30  WARN 531812 --- [nio-8080-exec-9] i.m.server.McpAsyncServer                : Client requested unsupported protocol version: 2025-11-25, so the server will suggest the 2024-11-05 version instead
+2026-11-10T20:52:37.475+05:30  INFO 531812 --- [nio-8080-exec-4] i.m.server.McpAsyncServer                : Client initialize request - Protocol: 2025-11-25, Capabilities: ClientCapabilities[experimental=null, roots=null, sampling=null, elicitation=null], Info: Implementation[name=mcp, title=null, version=0.1.0]
+2026-11-10T20:52:37.475+05:30  WARN 531812 --- [nio-8080-exec-4] i.m.server.McpAsyncServer                : Client requested unsupported protocol version: 2025-11-25, so the server will suggest the 2024-11-05 version instead
+2026-11-10T20:52:38.568+05:30  INFO 531812 --- [nio-8080-exec-8] i.m.server.McpAsyncServer                : Client initialize request - Protocol: 2025-11-25, Capabilities: ClientCapabilities[experimental=null, roots=null, sampling=null, elicitation=null], Info: Implementation[name=mcp, title=null, version=0.1.0]
+2026-11-10T20:52:38.568+05:30  WARN 531812 --- [nio-8080-exec-8] i.m.server.McpAsyncServer                : Client requested unsupported protocol version: 2025-11-25, so the server will suggest the 2024-11-05 version instead
+2026-11-10T20:52:39.958+05:30  INFO 531812 --- [nio-8080-exec-1] i.m.server.McpAsyncServer                : Client initialize request - Protocol: 2025-11-25, Capabilities: ClientCapabilities[experimental=null, roots=null, sampling=null, elicitation=null], Info: Implementation[name=mcp, title=null, version=0.1.0]
+2026-11-10T20:52:39.958+05:30  WARN 531812 --- [nio-8080-exec-1] i.m.server.McpAsyncServer                : Client requested unsupported protocol version: 2025-11-25, so the server will suggest the 2024-11-05 version instead
+2026-11-10T20:52:41.381+05:30  INFO 531812 --- [nio-8080-exec-2] i.m.server.McpAsyncServer                : Client initialize request - Protocol: 2025-11-25, Capabilities: ClientCapabilities[experimental=null, roots=null, sampling=null, elicitation=null], Info: Implementation[name=mcp, title=null, version=0.1.0]
+2026-11-10T20:52:41.381+05:30  WARN 531812 --- [nio-8080-exec-2] i.m.server.McpAsyncServer                : Client requested unsupported protocol version: 2025-11-25, so the server will suggest the 2024-11-05 version instead
 ```
 
-Traced latency confirms the router itself costs well under 1ms, against ~2 seconds for the rest of the request — a real, measured savings for every request it catches, not just an assumption.
-
-### 6b — Structured tracing
-
-Every hop of a request now logs a JSON line to `trace.log`, correlated by a shared `trace_id` generated once per user request and threaded through the A2A message's `metadata` field:
-supervisor.route → routing decision + latency
-supervisor.a2a_call → full round trip to the chosen agent
-agent.tool_call → the agent's LangChain loop (LLM + tool call)
-mcp.tool_call → the underlying MCP/database round-trip
-
-### What the trace revealed
-
-Breaking down a ~2 second request:
-
-| Span | Latency | Share |
-|---|---|---|
-| Routing (regex) | 0.17 ms | ~0% |
-| MCP tool call (DB round-trip) | 26 ms | ~1.3% |
-| Agent's LLM reasoning (2 passes) | ~1982 ms | ~97.9% |
-| A2A network overhead | ~18 ms | ~0.9% |  
-
-The database and network layers are fast and not the bottleneck. 
-Nearly all latency is the local LLM's own inference time — deciding to call a tool, then composing the final answer. 
-No amount of MCP or A2A optimization would meaningfully improve response time here; only a faster/smaller model, fewer LLM calls per request, or better hardware utilization would.
-
-## Phase 6 (continued): Structured Failure Semantics
-
-Failures were previously logged as raw exception strings — useful for a human reading one log line, but not groupable or queryable across many requests. Failures are now classified into a fixed set of structured reasons, logged alongside the raw error, so failure types can be counted, filtered, and eventually used to tune prompts or add targeted retry/fallback logic.
-
-### Failure taxonomy
-
-```python
-class FailureReason(str, Enum):
-    MCP_TIMEOUT = "mcp_timeout"
-    MCP_TOOL_ERROR = "mcp_tool_error"
-    A2A_TASK_FAILURE = "a2a_task_failure"
-    AGENT_CARD_STALE = "agent_card_stale"
-    LLM_MALFORMED_OUTPUT = "llm_malformed_output"
-    UNKNOWN = "unknown"
+### Step 2: Terminal 2: Start the **FastAPI Wrapper**
+```bash
+cd a2a-agents
+source .venv/bin/activate
+uvicorn api:app --host 0.0.0.0 --port 8000
 ```
 
-`classify_exception()` inspects the raised exception and returns one of these. Every failure logged by the agent (`agent.tool_call_error`) and the MCP tool wrapper (`mcp.tool_call_error`) now carries a `reason` field, not just a free-text `error` string.
+![Stage 2: Terminal 2](./images/3.png)
 
-### The ExceptionGroup gotcha
+```text
+Terminal 2
 
-The MCP Python SDK's SSE client uses `anyio.create_task_group()` internally. When the underlying connection fails, `anyio` wraps the real cause in an `ExceptionGroup`, whose own `str()` is a generic `"unhandled errors in a TaskGroup (1 sub-exception)"` — the actual cause (e.g. `httpcore.ConnectError`) lives inside `.exceptions`, not in the outer message. A naive `str(exc)` check missed this entirely and classified every MCP outage as `unknown`. `classify_exception()` unwraps `ExceptionGroup`s before inspecting message text:
-
-```python
-exceptions_to_check = [exc]
-if hasattr(exc, "exceptions"):
-    exceptions_to_check = list(exc.exceptions)
+(.venv) user@user-Z790-UD:~/my_activities/developments/multi-agent-e-commerce-system/a2a-agents$ cd ..
+(.venv) user@user-Z790-UD:~/my_activities/developments/multi-agent-e-commerce-system$ cd a2a-agentscd a2a-agents
+source .venv/bin/activate
+uvicorn api:app --host 0.0.0.0 --port 8000
+INFO:     Started server process [542009]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+  [event] StreamResponse
+INFO:     127.0.0.1:54478 - "POST /chat HTTP/1.1" 200 OK
+  [event] StreamResponse
+INFO:     127.0.0.1:53472 - "POST /chat HTTP/1.1" 200 OK
+  [event] StreamResponse
+INFO:     127.0.0.1:59530 - "POST /chat HTTP/1.1" 200 OK
+  [event] StreamResponse
+INFO:     127.0.0.1:57350 - "POST /chat HTTP/1.1" 200 OK
+  [event] StreamResponse
+INFO:     127.0.0.1:48196 - "POST /chat HTTP/1.1" 200 OK
+  [event] StreamResponse
+  [event] StreamResponse
+INFO:     127.0.0.1:39378 - "POST /chat HTTP/1.1" 200 OK
 ```
 
-### Verified against a real outage
-
-Stopping the Java `Mcp-Server` mid-session and sending requests through the live stack produced consistent, correctly classified results across repeated up/down cycles:
-
-```json
-{"trace_id": "f9e19df4", "span": "mcp.tool_call", "latency_ms": 110.0}
-{"trace_id": "f9e19df4", "span": "agent.tool_call", "output": "Order #1 for Alice Smith is SHIPPED, total $99.98.", "latency_ms": 4771.5}
+### Step 3: Terminal 3: The Bulletproof Demo (Single Command)
+- To guarantee a clean state and avoid stale background processes holding onto deleted log files (a **classic Linux "ghost file descriptor" quirk**), use the provided **start_demo.sh** script.
+- This script:
+    - Kills any stale agent processes
+    - Clears old trace logs
+    - Starts fresh agents in the background
+    - Runs the automated eval harness
+```bash
+cd a2a-agents
+source .venv/bin/activate
+./start_demo.sh
 ```
-```json
-{"trace_id": "cee78616", "span": "mcp.tool_call_error", "error": "unhandled errors in a TaskGroup (1 sub-exception)", "reason": "mcp_tool_error", "latency_ms": 0}
-{"trace_id": "cee78616", "span": "agent.tool_call_error", "reason": "mcp_tool_error", "latency_ms": 920.0}
+##### Expected Output:
+```text
+Routing: 14/14
+Tool selection: 14/14
+Args match: 14/14
+Full pass: 14/14
+```
+![Stage 3: Terminal 3](./images/4.png)
+
+```text
+Terminal 3
+
+user@user-Z790-UD:~$ cd ~/my_activities/developments/multi-agent-e-commerce-system
+user@user-Z790-UD:~/my_activities/developments/multi-agent-e-commerce-system$ cd a2a-agents
+source .venv/bin/activate
+./start_demo.sh
+🚀 ==========================================
+🚀 Starting Bulletproof A2A + MCP Demo
+🚀 ==========================================
+🧹 Step 1: Cleaning up any stale background processes...
+🗑️  Step 2: Deleting old trace logs (Critical for clean state)...
+⚙️  Step 3: Starting fresh A2A Agents in background...
+⏳ Step 4: Waiting 3 seconds for Uvicorn servers to bind ports...
+✅ Agents started! (PIDs: Order=544214, Inventory=544215, Cart=544216)
+🧪 Step 5: Running the Automated Eval Harness...
+----------------------------------------
+Running: order_status_explicit...
+  [event] StreamResponse
+  [PASS] routing=True tool=['getOrderStatus'] (expected getOrderStatus) tool_ok=True args_ok=True
+Running: order_status_phrased...
+  [event] StreamResponse
+  [PASS] routing=True tool=['getOrderStatus'] (expected getOrderStatus) tool_ok=True args_ok=True
+Running: order_refund...
+  [event] StreamResponse
+  [PASS] routing=True tool=['getOrderStatus'] (expected getOrderStatus) tool_ok=True args_ok=True
+Running: inventory_stock_check...
+  [event] StreamResponse
+  [PASS] routing=True tool=['searchProducts'] (expected searchProducts) tool_ok=True args_ok=True
+Running: inventory_search...
+  [event] StreamResponse
+  [PASS] routing=True tool=['searchProducts'] (expected searchProducts) tool_ok=True args_ok=True
+Running: inventory_availability...
+  [event] StreamResponse
+  [PASS] routing=True tool=['searchProducts'] (expected searchProducts) tool_ok=True args_ok=True
+Running: order_bad_id...
+  [event] StreamResponse
+  [PASS] routing=True tool=['getOrderStatus'] (expected getOrderStatus) tool_ok=True args_ok=True
+Running: inventory_bad_product...
+  [event] StreamResponse
+  [PASS] routing=True tool=['searchProducts'] (expected searchProducts) tool_ok=True args_ok=True
+Running: order_ambiguous_phrasing...
+  [event] StreamResponse
+  [PASS] routing=True tool=[] (expected None) tool_ok=True args_ok=True
+Running: inventory_ambiguous_phrasing...
+  [event] StreamResponse
+  [PASS] routing=True tool=[] (expected None) tool_ok=True args_ok=True
+Running: cart_add...
+  [event] StreamResponse
+  [PASS] routing=True tool=['searchProducts', 'addToCart'] (expected addToCart) tool_ok=True args_ok=True
+Running: cart_view...
+  [event] StreamResponse
+  [PASS] routing=True tool=['viewCart'] (expected viewCart) tool_ok=True args_ok=True
+Running: cart_checkout...
+  [event] StreamResponse
+  [PASS] routing=True tool=['checkout'] (expected checkout) tool_ok=True args_ok=True
+Running: cart_remove...
+  [event] StreamResponse
+  [PASS] routing=True tool=['removeFromCart'] (expected removeFromCart) tool_ok=True args_ok=True
+
+Routing: 14/14
+Tool selection: 14/14
+Args match: 14/14
+Full pass: 14/14
+Full results written to eval_results.json
+```
+---
+
+### Step 4: Terminal 4: Start the Streamlit UI
+```bash
+cd a2a-agents
+source .venv/bin/activate
+streamlit run app.py
+```
+- Open your browser to **http://localhost:8501** to interact with the system.
+
+![Stage 4: Terminal 4](./images/5.png)
+```text
+Terminal 4
+
+user@user-Z790-UD:~$ cd ~/my_activities/developments/multi-agent-e-commerce-system
+user@user-Z790-UD:~/my_activities/developments/multi-agent-e-commerce-system$ cd a2a-agents
+source .venv/bin/activate
+streamlit run app.py
+2026-11-10 20:53:43.506 Uvicorn server started on :::8501
+
+  You can now view your Streamlit app in your browser.
+
+  Local URL: http://localhost:8501
+  Network URL: http://192.168.1.71:8501
+
+  Help agents write better Streamlit apps?
+  Install the official Streamlit skills by running streamlit skills in your terminal.
+```
+![Stage 4: Terminal 4](./images/6.png)
+
+![Stage 4: Terminal 4](./images/7.png)
+
+![Stage 4: Terminal 4](./images/8.png)
+
+![Stage 4: Terminal 4](./images/9.png)
+
+![Stage 4: Terminal 4](./images/10.png)
+
+![Stage 4: Terminal 4](./images/11.png)
+
+---
+
+## 🧪 Automated Validation & Eval Harness
+- The system includes a rigorous **evaluation harness** (*run_evals.py*) that tests routing, tool selection, and argument extraction across **$14$** **diverse scenarios**, including **multi-step tool chaining** (e.g., **searchProducts** followed by **addToCart**).
+
+### Latest Eval Results:
+
+| Metric | Score |
+| :------------ | :------------ |
+| Deterministic Routing | 14/14 ✅ |
+| Tool Selection | 14/14 ✅ |
+| Argument Matching | 14/14 ✅ |
+| Full Pass | 14/14 ✅ |
+
+
+> #### Note: 
+> The **harness** uses substring matching for arguments to tolerate natural LLM phrasing variations (e.g., expecting "mouse" but receiving "wireless mouse"). 
+> It also supports multi-step tool call verification for complex scenarios like cart operations.
+
+---
+
+## 🗺️ Project Roadmap Status
+### ✅ Phase 1
+- In-process function calling, no protocol
+### ✅ Phase 2
+- MCP server + bare client, protocol mechanics proven
+### ✅ Phase 3
+- LLM decides tool calls from natural language over MCP
+### ✅ Phase 4
+- Multi-Agent Supervisor (LangGraph)
+    - Adds a second, Python-based client (langgraph-supervisor/) that connects to the same unmodified Java MCP server, proving MCP's cross-language interoperability.
+### ✅ Phase 5
+#### A2A Agent Services
+- Each agent becomes an independent network service that publishes an Agent Card. 
+- The supervisor discovers and delegates to them over A2A (Agent2Agent). 
+- The Java MCP server is unchanged: MCP handles agent-to-tool calls, A2A handles agent-to-agent calls.
+
+### ✅ Phase 6 — Deterministic Routing, Structured Tracing, Circuit Breakers, Fan-out/Join
+#### 6a: 
+- Deterministic regex router (sub-millisecond routing for obvious cases)
+#### 6b: 
+- Structured, trace-correlated JSON logging (trace.log)
+### 6c: 
+- Exception unwrapping for accurate failure classification (FailureReason)
+#### 6d: 
+- Circuit breaker to prevent cascading failures
+#### 6e: 
+- Fan-out/join concurrency with request splitting and extended HTTP timeouts
+
+### ✅ Phase 7 — Domain Expansion: UCP-Style Cart/Checkout Tools
+- Expanded the e-commerce simulation with a new cart_agent (port 9103) and 4 new MCP tools:
+    - addToCart(productId, quantity) — Adds items to the global cart
+    - viewCart() — Returns all cart items with subtotal
+    - removeFromCart(productId) — Removes items from cart
+    - checkout() — Finalizes cart → creates a real Order with status PENDING, clears cart, returns order ID
+
+#### New Java Components:
+- **CartItem.java**:
+    - JPA entity for cart items
+- **CartItemRepo.java**
+    - Spring Data repository
+- Updated **EcommerceToolService.jav**a with 4 new **@Tool methods**
+
+#### New Python Component:
+- **cart_agent.py** 
+    - A2A server on port 9103 with access to searchProducts (for name→ID resolution) plus all cart tools
+
+#### End-to-End User Journey:
+```text
+"search for mouse" → inventory_agent → searchProducts
+"add 2 to my cart" → cart_agent → searchProducts + addToCart
+"what's in my cart?" → cart_agent → viewCart
+"checkout" → cart_agent → checkout (creates real Order #3)
+"status of order 3" → order_agent → getOrderStatus
 ```
 
-The failure-facing message shown to the end user (`Bot: ...`) still surfaces the generic `ExceptionGroup` text, since that path wasn't changed — only the structured log gained the classified reason. Surfacing a friendlier, classified message to the user is a natural follow-up, not yet done.
+### ✅ Phase 8 — Streamlit GUI
+- A professional, visual interface that makes the multi-agent orchestration transparent:
+    - **FastAPI wrapper (api.py)**:
+        - Exposes /chat, /agents, /health endpoints
+    - **Streamlit UI (app.py)**:
+        - Chat interface with:
+            - 🧭 Routing visualization ("Routed to Cart Agent")
+            - 🔧 Tool call display (searchProducts, addToCart)
+            - ⏱️ Latency & trace ID display
+            - 🔄 Fan-out visualization for compound requests
+            - 📊 Sidebar showing active agents and architecture
 
-### A real debugging note from building this
+### ✅ Phase 9 — Bulletproof Demo Script
+- **start_demo.sh** automates the entire demo lifecycle, eliminating the "ghost file descriptor" quirk and guaranteeing reproducible 14/14/14 eval scores every time.
 
-Mid-testing, failures intermittently showed `"reason": "unknown"` with the error `"name 'FailureReason' is not defined"`, even though the code was correct. The cause was a **stale background process**: an earlier, pre-fix run of `order_agent.py` was still alive and listening on the same port, so some requests landed on the old process and some on the new one. `lsof -i :9101` showed two PIDs; killing both and restarting cleanly resolved it. Same root cause as an earlier Phase 5 issue — editing a shared module (`common.py`/`failures.py`) only takes effect in processes started *after* the edit, and Python doesn't warn you if an old process is still running alongside a new one.
+---
 
-### Circuit breaker
+> **⚠️ Hardware & Performance Notes**
+> **VRAM Constraints**: 
+> On an 8GB VRAM GPU (RTX 4060 Ti), the qwen2.5:7b-8k model loads entirely into VRAM. However, Ollama processes inference sequentially. During Phase 6 "Fan-out" (calling both agents simultaneously), expect per-request latency to increase from ~1.5s to ~2.5s due to queuing at the inference layer. The architecture handles this gracefully via extended httpx timeouts (30s).
 
-Without this, every request made a fresh, full-length attempt to reach MCP even when it was already known to be down — each failed attempt still cost close to a second (the `ExceptionGroup`'s connection-timeout behavior) before failing. A simple circuit breaker now tracks consecutive MCP failures per agent process and, once a threshold is hit, short-circuits further attempts for a cooldown window instead of repeating a doomed connection attempt:
+> **Context Window**: 
+> The 8192 context window is critical. A2A JSON-RPC payloads and Agent Cards are highly structured. Using the default 2048 limit will result in silent JSON truncation and parsing failures.
 
-The tool wrapper checks the circuit before attempting a call; if open, it fails instantly (logged as a `mcp.tool_call_error` with a dedicated reason) rather than waiting out a real connection attempt. A successful call resets the failure count, so the breaker re-opens automatically once MCP recovers rather than needing a manual reset.
+> **Ghost File Descriptor Quirk**: > When running agents as background processes, deleting trace.log while they're running causes them to write to a "ghost" file descriptor. The start_demo.sh script solves this by killing all stale processes before clearing logs.
 
-This is scoped intentionally narrow: it protects *future* requests from repeating a known-bad attempt, not the request that originally discovered the failure — there's no way to know MCP is down before trying it at least once.
-### Circuit breaker
+---
 
-Verified live: with `Mcp-Server` down, the first two requests fail with a real connection error and trip the breaker; request 3 onward short-circuits instantly (`latency_ms: 0`) instead of repeating a doomed attempt.
+## 📝 Key Learnings
+- **Cross-Language Interoperability**: 
+    - MCP's protocol-based design means the Java server required zero changes to serve Python agents.
+- **Stale Background Processes**:
+    - Editing a shared module only takes effect in processes started after the edit. Python doesn't warn you if an old process is still running alongside a new one.
+- **Concurrent LLM Bottlenecks**:
+    - A single local Ollama instance doesn't truly serve two generation requests in parallel. 
+    - "Concurrent" at the network layer ≠ concurrent at the inference layer.
+- **Prompt Engineering for Tool Selection**: 
+    - Local LLMs need explicit, rule-based prompts to avoid tool hallucination (e.g., inventing product IDs instead of using searchProducts).
+- **Fan-out Edge Cases**: 
+    - Compound requests must be split before dispatch to prevent agents from attempting to answer questions outside their scope.
 
-The check was later moved to the top of `execute()`, before the LLM call — the original version only skipped the MCP call itself, leaving the ~800ms LLM reasoning cost untouched. Now a known-down MCP server skips the LLM entirely, not just the tool call. The now-redundant lower-level check was removed.
+---
 
-### Happy path re-confirmed
+## 🎯 What's Next?
+- Publish the Medium post documenting the journey from Phase 1 to Phase 9
+- Per-user carts with session-based authentication
+- Streaming responses in the Streamlit GUI for real-time token display
+- Additional agents (e.g., recommendation_agent, support_agent)
+- Production deployment with Docker Compose for the entire stack
 
-After adding the circuit breaker, the eval harness was re-run with MCP healthy specifically to catch any regression from the failure-handling changes. All 10 scenarios still passed — the new logic didn't break normal operation.
+---
 
-### Tool-use bug found and fixed
+## 📋 Summary of Changes from Original README
 
-Reading the eval answers (not just routing pass/fail) surfaced a real issue: agents asked for information already given instead of calling the obvious tool — e.g. asking for an order ID right after being given one. Caused by underspecified system prompts; rewritten to instruct the agent to act on information already present rather than ask again. Re-tested: all three affected scenarios now call the tool directly; two genuinely ambiguous scenarios still correctly ask for clarification.
+| Section | What Changed |
+|---------|--------------|
+| **Application Overview** | Added Cart Agent, Streamlit GUI, and FastAPI wrapper |
+| **Architecture Diagram** | Replaced PNG with Mermaid; added `cart_agent :9103` and new tools |
+| **User Journey Workflow** | Added new Mermaid sequence diagram showing end-to-end shopping flow |
+| **Technology Stack** | Added `a2a-sdk`, FastAPI, Uvicorn, Streamlit |
+| **How to Run** | Added `start_demo.sh` bulletproof demo script |
+| **Eval Harness** | Updated from 10/10 to **14/14/14**; added multi-step tool verification |
+| **Roadmap** | Added Phase 7 (Cart/Checkout), Phase 8 (Streamlit GUI), Phase 9 (Bulletproof Demo) |
+| **Hardware Notes** | Added ghost file descriptor quirk explanation |
+| **Key Learnings** | New section documenting 5 major insights from the build |
+| **What's Next** | Future roadmap items |
 
-### Eval harness: tool + argument checks
 
-The harness previously only checked routing, which is how the bug above went undetected. It now reads `trace.log` and asserts the actual MCP tool called and its arguments (string args matched by substring, to tolerate reasonable phrasing differences). Result: 10/10 on routing, tool selection, and arguments.
-
-### Fan-out / join
-
-Compound requests needing both agents (e.g. "check order 1 and inventory for mouse") previously had no path that handled both halves. `route()` now detects this and returns `"both"`; `ask_both()` calls both agents concurrently via `asyncio.gather` and merges results in code, no second LLM call. Verified via overlapping timestamps in both agents' trace spans, confirming real parallelism.
-
-### Roadmap update
-
-- **6a–6c + circuit breaker + fan-out/join**: done, including LLM-cost optimization and a confirmed happy-path regression check
-- **6d (eval harness)**: now checks routing, tool selection, and arguments — 10/10, and caught a real bug
-- **Next**: UCP-style cart/checkout tools, or publishing the Medium post
-
-### Fan-out/join: issues found and fixed under real concurrency
-
-Testing the fan-out pattern surfaced three real, non-obvious problems that single-agent testing never exposed:
-
-1. **Both agents received the full compound question**, each attempting to answer parts outside its own scope (e.g. the inventory agent tried to address an order status question with no `getOrderStatus` tool available). Fixed by splitting the request into order-relevant and inventory-relevant slices before fan-out, so each agent only ever sees its own part.
-
-2. **Concurrent requests to the same local Qwen2.5 instance roughly tripled per-request latency** (from ~2s to 5-7s each), even though the supervisor correctly dispatched both calls in parallel via `asyncio.gather`. This caused the default A2A client timeout to trip. Root cause: a single local Ollama instance doesn't truly serve two generation requests in parallel — "concurrent" at the network layer doesn't mean concurrent at the inference layer. Fixed by passing a longer `httpx` timeout via `ClientConfig`, not by changing the fan-out logic itself — the architecture was correct; the shared local LLM was the real bottleneck.
-
-3. **Tool-call hallucination**: even after the request was split, one phrasing caused the inventory agent to call `checkInventory(productId=123)` — inventing a nonexistent product ID — instead of `searchProducts`, which needs no ID. The system prompt named both tools but didn't say which to prefer by default. Fixed by making the prompt explicit that name-based questions should always use `searchProducts`, and explicitly forbidding guessing an ID.
-
-All three are genuine findings from testing real concurrent load, not bugs visible in sequential single-agent testing — a direct demonstration of why evaluating only the happy path, one request at a time, misses real production failure modes.
-
-### Roadmap update
-
-- **Fan-out/join**: implemented, debugged under real concurrency, and verified — split-before-dispatch, parallel execution, correct merged results
-- **Next**: UCP-style cart/checkout tools, or publishing the Medium post

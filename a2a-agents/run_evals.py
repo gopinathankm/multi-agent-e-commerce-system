@@ -31,18 +31,61 @@ async def run_scenario(scenario: dict) -> dict:
     answer = await ask(AGENTS[actual_target], text, trace_id)
     time.sleep(0.3)  # let logging flush before reading trace.log
 
+    # entries = read_trace_entries(trace_id)
+    # tool_call_entries = [e for e in entries if e.get("span") == "mcp.tool_call"]
+
+    # actual_tool = tool_call_entries[0]["tool"] if tool_call_entries else None
+    # actual_args = tool_call_entries[0]["args"] if tool_call_entries else {}
+
+    # expected_tool = scenario.get("expected_tool")
+    # tool_ok = (expected_tool is None) or (actual_tool == expected_tool)
+
+    # # expected_args = scenario.get("expected_args") or {}
+    # # args_ok = all(actual_args.get(k) == v for k, v in expected_args.items())
+    # expected_args = scenario.get("expected_args") or {}
+    # args_ok = True
+    # for k, v in expected_args.items():
+    #     actual_v = actual_args.get(k)
+    #     # Substring match for strings to tolerate reasonable phrasing differences (e.g., "mouse" in "wireless mouse")
+    #     if isinstance(v, str) and isinstance(actual_v, str):
+    #         if v not in actual_v:
+    #             args_ok = False
+    #             break
+    #     elif actual_v != v:
+    #         args_ok = False
+    #         break
+    
     entries = read_trace_entries(trace_id)
     tool_call_entries = [e for e in entries if e.get("span") == "mcp.tool_call"]
 
-    actual_tool = tool_call_entries[0]["tool"] if tool_call_entries else None
-    actual_args = tool_call_entries[0]["args"] if tool_call_entries else {}
-
     expected_tool = scenario.get("expected_tool")
-    tool_ok = (expected_tool is None) or (actual_tool == expected_tool)
-
     expected_args = scenario.get("expected_args") or {}
-    args_ok = all(actual_args.get(k) == v for k, v in expected_args.items())
 
+    # Check if expected_tool appears in ANY of the tool calls (supports multi-step flows)
+    actual_tools = [e.get("tool") for e in tool_call_entries]
+    tool_ok = (expected_tool is None) or (expected_tool in actual_tools)
+
+    # Find the args for the expected_tool (if it was called)
+    actual_args = {}
+    args_ok = True
+    if expected_tool and expected_tool in actual_tools:
+        # Find the specific entry for the expected tool
+        matching_entry = next((e for e in tool_call_entries if e.get("tool") == expected_tool), None)
+        if matching_entry:
+            actual_args = matching_entry.get("args", {})
+            for k, v in expected_args.items():
+                actual_v = actual_args.get(k)
+                # Substring match for strings to tolerate reasonable phrasing differences
+                if isinstance(v, str) and isinstance(actual_v, str):
+                    if v not in actual_v:
+                        args_ok = False
+                        break
+                elif actual_v != v:
+                    args_ok = False
+                    break
+    elif expected_tool is not None:
+        args_ok = False  # Expected tool wasn't called at all
+        
     return {
         "id": scenario["id"],
         "input": text,
@@ -50,7 +93,7 @@ async def run_scenario(scenario: dict) -> dict:
         "actual_target": actual_target,
         "routed_ok": routed_ok,
         "expected_tool": expected_tool,
-        "actual_tool": actual_tool,
+        "actual_tool": actual_tools,
         "tool_ok": tool_ok,
         "expected_args": expected_args,
         "actual_args": actual_args,

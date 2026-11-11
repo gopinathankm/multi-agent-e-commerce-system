@@ -8,5 +8,9 @@
   {"id": "order_bad_id", "input": "status of order 999", "expected_target": "order", "expected_tool": "getOrderStatus", "expected_args": {"orderId": 999}},
   {"id": "inventory_bad_product", "input": "do you have a flying carpet in stock", "expected_target": "inventory", "expected_tool": "searchProducts", "expected_args": {}},
   {"id": "order_ambiguous_phrasing", "input": "I'm not sure if my package shipped", "expected_target": "order", "expected_tool": null, "expected_args": {}},
-  {"id": "inventory_ambiguous_phrasing", "input": "I'm not sure if that item is still around", "expected_target": "inventory", "expected_tool": null, "expected_args": {}}
+  {"id": "inventory_ambiguous_phrasing", "input": "I'm not sure if that item is still around", "expected_target": "inventory", "expected_tool": null, "expected_args": {}},
+  {"id": "cart_add", "input": "add 2 mice to my cart", "expected_target": "cart", "expected_tool": "addToCart", "expected_args": {"quantity": 2}},
+  {"id": "cart_view", "input": "what's in my cart", "expected_target": "cart", "expected_tool": "viewCart", "expected_args": {}},
+  {"id": "cart_checkout", "input": "checkout please", "expected_target": "cart", "expected_tool": "checkout", "expected_args": {}},
+  {"id": "cart_remove", "input": "remove product 1 from my cart", "expected_target": "cart", "expected_tool": "removeFromCart", "expected_args": {"productId": 1}}
 ]

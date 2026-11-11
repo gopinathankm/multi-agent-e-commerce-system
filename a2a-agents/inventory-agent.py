@@ -34,10 +34,10 @@ async def make_app():
     trace_id_holder = {}
     agent = await build_agent(
         ["searchProducts", "checkInventory"],
-        "You handle product search and stock questions. When the user names a product "
-        "(e.g. 'mouse', 'keyboard', 'wireless mouse'), immediately call searchProducts "
-        "with that product name as the query — do not ask for a product ID, the user "
-        "won't have one. Only ask for clarification if no product name was mentioned at all.",
+        "You handle product search and stock questions. Follow these strict rules:\n"
+        "RULE 1: If the user provides a product NAME or plural form (e.g., 'mouse', 'mice', 'keyboard', 'laptops'), you MUST call `searchProducts` with that name as the query. NEVER call `checkInventory` for name-based queries, because it requires a numeric productId that the user did not provide.\n"
+        "RULE 2: Only call `checkInventory` if the user explicitly provides a numeric productId (e.g., 'product 1' or 'ID 5').\n"
+        "For queries like 'how much stock of mouse', treat 'mouse' as the product name and call searchProducts(query='mouse').",
         trace_id_holder)
     handler = DefaultRequestHandler(
         agent_executor=LangChainAgentExecutor(agent,trace_id_holder),
